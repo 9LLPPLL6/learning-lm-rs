@@ -1,3 +1,5 @@
+use std::vec;
+
 use crate::tensor::Tensor;
 
 // get (row) vectors from a 2D table given a list of indices
@@ -71,7 +73,24 @@ pub fn masked_softmax(y: &mut Tensor<f32>) {
 }
 
 pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: f32) {
-    todo!("实现 rms_norm，计算前做一些必要的检查会帮助你后续调试")
+    //todo!("实现 rms_norm，计算前做一些必要的检查会帮助你后续调试");
+    let last_dime = *y.shape().last().unwrap();
+    
+    let _y = unsafe {
+        y.data_mut()
+    };
+    let _x = x.data();
+    let _w = w.data();
+    //let loop_count = _y.len()/last_dime;
+
+    let x_chunk: Vec<&[f32]> = _x.chunks(last_dime).collect();
+    let mut y_chunk: Vec<&mut [f32]> = _y.chunks_mut(last_dime).collect();
+    for i in 0..x_chunk.len(){
+        let demon = (x_chunk[i].iter().map(|&x| x*x).sum::<f32>() / last_dime as f32 + epsilon).sqrt();
+        for j in 0..last_dime {
+            y_chunk[i][j] = _w[j] * x_chunk[i][j] / demon;
+        }
+    }
 }
 
 // y = sigmoid(x) * x * y
@@ -94,6 +113,8 @@ pub fn silu(y: &mut Tensor<f32>, x: &Tensor<f32>) {
 // hint: You don't need to do an explicit transpose of B
 pub fn matmul_transb(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor<f32>, alpha: f32) {
     todo!("实现 matmul_transb，计算前做一些必要的检查会帮助你后续调试");
+
+    
 }
 
 // Dot product of two tensors (treated as vectors)
