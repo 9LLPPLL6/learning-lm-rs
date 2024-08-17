@@ -30,6 +30,7 @@ impl Llama<f32> {
         let config: LlamaConfigJson = serde_json::from_reader(config).unwrap();
         let model_file = std::fs::read(model_dir.as_ref().join("model.safetensors")).unwrap();
         let safetensor = SafeTensors::deserialize(&model_file).unwrap();
+        //println!("{:#?}",safetensor);
         let params = LLamaParams::from_safetensors(&safetensor, &config);
 
         Self {
