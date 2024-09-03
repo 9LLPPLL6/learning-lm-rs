@@ -154,6 +154,20 @@ pub fn dot(x: &Tensor<f32>, y: &Tensor<f32>) -> f32 {
     sum
 }
 
+//转置tensor
+pub fn transpose( x: &Tensor<f32>) -> Tensor<f32> {
+    let _x = x.data();
+    let shape = x.shape();
+    let mut y = Tensor::<f32>::new(vec![0.0; shape[1] * shape[0]], &vec![shape[1], shape[0]]);
+    let _y = unsafe { y.data_mut() };
+    for i in 0..shape[0] {
+        for j in 0..shape[1] {
+            _y[j * shape[0] + i] = _x[i * shape[1] + j];
+        }
+    }
+    y
+}
+
 // Sample a index from a tensor (treated as a probability vector)
 pub fn random_sample(x: &Tensor<f32>, top_p: f32, top_k: u32, temperature: f32) -> u32 {
     assert!(x.shape()[x.shape().len() - 1] == x.size());

@@ -3,7 +3,7 @@ use std::vec;
 
 use crate::config::LlamaConfigJson;
 use crate::kvcache::KVCache;
-use crate::operators as OP;
+use crate::operators::{self as OP, matmul_transb};
 use crate::params::LLamaParams;
 use crate::tensor::Tensor;
 use safetensors::SafeTensors;
@@ -148,13 +148,97 @@ fn self_attention(
     q: &Tensor<f32>,                 // (seq, n_kv_h * n_groups * dqkv)
     k: &Tensor<f32>,                 // (total_seq, n_kv_h * dqkv)
     v: &Tensor<f32>,                 // (total_seq, n_kv_h * dqkv)
-    n_kv_h: usize,
-    n_groups: usize,
-    seq_len: usize,
+    n_kv_h: usize,                   // kv头数
+    n_groups: usize,                 // q是kv的几倍
+    seq_len: usize,                 
     total_seq_len: usize,
-    dqkv: usize,
+    dqkv: usize,                     //qkv的长度   
 ) {
-    todo!("Implement self_attention");
+    //todo!("Implement self_attention");
+    
+    //计算score = Q @ K.T / sqrt(dim)
+    for g in 0..n_groups {
+        
+        for h in 0..n_kv_h {
+            let mut tem_k_vec = Vec::<f32>::new();
+            for i in 0..total_seq_len {
+                for j in 0..dqkv {
+                    tem_k_vec.push(k.data()[i * n_kv_h * dqkv + h * dqkv + j]);
+                }
+            }
+        }
+    }
+
+    for h in 0..n_kv_h {
+
+        //得到一头的k
+        let mut tem_k_vec = Vec::<f32>::new();
+        for i in 0..total_seq_len {
+            for j in 0..dqkv {
+                tem_k_vec.push(k.data()[i * n_kv_h * dqkv + h * dqkv + j]);
+            }
+        }
+        let tem_k = Tensor::<f32>::new(tem_k_vec, &vec![total_seq_len, dqkv]);
+
+        //得到一头的v
+        let mut tem_v_vec = Vec::<f32>::new();
+        for i in 0..total_seq_len {
+            for j in 0..dqkv {
+                tem_v_vec.push(v.data()[i * n_kv_h * dqkv + h * dqkv + j]);
+            }
+        }
+        let tem_v = Tensor::<f32>::new(tem_v_vec, &vec![total_seq_len, dqkv]);
+
+        //得到一头的q
+        let mut tem_q_vec = Vec::<f32>::new();
+        for i in 0..seq_len {
+            for j in 0..n_groups * dqkv {
+                tem_q_vec.push(q.data()[i * n_kv_h * n_groups * dqkv + h * n_groups * dqkv + j]);
+            }
+        }
+        let tem_q = Tensor::<f32>::new(tem_q_vec, &vec![seq_len, n_groups * dqkv]);
+
+        for g in 0..n_groups {
+            //切割得到每一组的q
+            let mut group_q_vec = Vec::<f32>::new();
+            for i in 0..seq_len {
+                for j in 0..dqkv {
+                    group_q_vec.push(tem_q.data()[i * n_groups * dqkv + g * dqkv + j]);
+                }
+            }
+            let group_q = Tensor::<f32>::new(group_q_vec, &vec![seq_len, dqkv]);
+
+            //计算每一组q的score = Q @ K.T / sqrt(dim)
+            let mut one_h_g_score = Tensor::<f32>::default(&vec![seq_len, total_seq_len]);
+            matmul_transb(&mut one_h_g_score, 0., &group_q, &tem_k, (dqkv as f32).sqrt());
+
+            //计算attn = softmax(score)
+            let mut attn = one_h_g_score;
+            OP::masked_softmax(&mut attn);
+            //将attn填充到att_scores中
+            let len = seq_len * total_seq_len;
+            unsafe {
+                for i in 0..(seq_len * total_seq_len) {
+                    att_scores.data_mut()[h * g * len + g * len + i] = attn.data()[i];
+                }
+            }
+
+            //计算attn @ V
+            let mut one_h_g_x = Tensor::<f32>::default(&vec![seq_len, dqkv]);
+            let mut _tem_v = OP::transpose(&tem_v);//对v进行转置
+            OP::matmul_transb(&mut one_h_g_x, 0., &attn, &_tem_v, 1.);
+
+            //将one_h_g_x填充到hidden_states中
+            unsafe {
+                for i in 0..seq_len {
+                    for j in 0..dqkv {
+                        hidden_states.data_mut()[i * n_kv_h * n_groups * dqkv + h * n_groups * dqkv + g * dqkv + j] = one_h_g_x.data()[i * dqkv + j];
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 fn mlp(
