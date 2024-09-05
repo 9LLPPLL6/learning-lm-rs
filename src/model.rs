@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::process::Output;
 use std::vec;
 
 use crate::config::LlamaConfigJson;
@@ -102,10 +103,26 @@ impl Llama<f32> {
             let full_k = &mut cache.k_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
             let full_v = &mut cache.v_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
 
-            todo!("self_attention(...)");
-            todo!("down_proj matmul and add residual");
+            //todo!("self_attention(...)");
+            self_attention(&mut hidden_states, &mut att_scores, q, &full_k, &full_v, self.n_kv_h, n_groups, seq_len, total_seq_len, self.dqkv);
+            
+            //todo!("down_proj matmul and add residual");
+            // x = x @ O_weight.T
+            // residual = x + residual
+            OP::matmul_transb(&mut residual, 1., &hidden_states, &self.params.wo[layer], 1.);
 
-            todo!("mlp(...)");
+            //todo!("mlp(...)");
+            mlp(
+                &mut residual,
+                &mut hidden_states,
+                &mut gate_buf,
+                &mut up_buf,
+                &self.params.w_up[layer],
+                &self.params.w_down[layer],
+                &self.params.w_gate[layer],
+                &self.params.rms_ffn_w[layer],
+                self.eps,
+            );
         }
 
         // No matter what seq_len, the output is always a 1D vector of length vocab,
@@ -134,10 +151,22 @@ impl Llama<f32> {
         top_k: u32,
         temperature: f32,
     ) -> Vec<u32>{
+        //todo!("实现文本生成");
         let mut result = Vec::<u32>::new();
-        
-        todo!("实现文本生成");
-        
+        let mut cache = self.new_cache();
+        result.extend_from_slice(token_ids);
+        //启动阶段
+        let input = Tensor::new(result.clone(), &vec![1, result.len()]);
+        let logits = self.forward(&input, &mut cache);
+        let mut output = OP::random_sample(&logits, top_p, top_k, temperature);   
+        result.push(output);
+        //自回归阶段
+        while result.len() < max_len && output != self.eos_token_id {
+            let input = Tensor::new(vec![output], &vec![1, 1]);
+            let logits = self.forward(&input, &mut cache);
+            output = OP::random_sample(&logits, top_p, top_k, temperature);
+            result.push(output);
+        }
         result
     }
 }
