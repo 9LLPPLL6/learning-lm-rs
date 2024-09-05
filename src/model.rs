@@ -111,6 +111,7 @@ impl Llama<f32> {
             // residual = x + residual
             OP::matmul_transb(&mut residual, 1., &hidden_states, &self.params.wo[layer], 1.);
 
+            
             //todo!("mlp(...)");
             mlp(
                 &mut residual,
