@@ -186,18 +186,6 @@ fn self_attention(
     //todo!("Implement self_attention");
     
     //计算score = Q @ K.T / sqrt(dim)
-    for g in 0..n_groups {
-        
-        for h in 0..n_kv_h {
-            let mut tem_k_vec = Vec::<f32>::new();
-            for i in 0..total_seq_len {
-                for j in 0..dqkv {
-                    tem_k_vec.push(k.data()[i * n_kv_h * dqkv + h * dqkv + j]);
-                }
-            }
-        }
-    }
-
     for h in 0..n_kv_h {
 
         //得到一头的k
@@ -239,7 +227,7 @@ fn self_attention(
 
             //计算每一组q的score = Q @ K.T / sqrt(dim)
             let mut one_h_g_score = Tensor::<f32>::default(&vec![seq_len, total_seq_len]);
-            matmul_transb(&mut one_h_g_score, 0., &group_q, &tem_k, (dqkv as f32).sqrt());
+            matmul_transb(&mut one_h_g_score, 0., &group_q, &tem_k, 1.0/(dqkv as f32).sqrt());
 
             //计算attn = softmax(score)
             let mut attn = one_h_g_score;
@@ -248,7 +236,7 @@ fn self_attention(
             let len = seq_len * total_seq_len;
             unsafe {
                 for i in 0..(seq_len * total_seq_len) {
-                    att_scores.data_mut()[h * g * len + g * len + i] = attn.data()[i];
+                    att_scores.data_mut()[h * n_groups * len + g * len + i] = attn.data()[i];
                 }
             }
 
