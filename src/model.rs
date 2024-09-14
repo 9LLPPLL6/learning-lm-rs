@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::process::Output;
 use std::vec;
+use std::io::Write;
 
 use crate::config::LlamaConfigJson;
 use crate::kvcache::KVCache;
@@ -29,9 +30,10 @@ impl Llama<f32> {
     pub fn from_safetensors(model_dir: impl AsRef<Path>) -> Self {
         let config = File::open(model_dir.as_ref().join("config.json")).unwrap();
         let config: LlamaConfigJson = serde_json::from_reader(config).unwrap();
+        //println!("{:#?}",config);
         let model_file = std::fs::read(model_dir.as_ref().join("model.safetensors")).unwrap();
         let safetensor = SafeTensors::deserialize(&model_file).unwrap();
-        //println!("{:#?}",safetensor);
+        // println!("{:#?}",safetensor);
         let params = LLamaParams::from_safetensors(&safetensor, &config);
 
         Self {
@@ -106,12 +108,19 @@ impl Llama<f32> {
             //todo!("self_attention(...)");
             self_attention(&mut hidden_states, &mut att_scores, q, &full_k, &full_v, self.n_kv_h, n_groups, seq_len, total_seq_len, self.dqkv);
             
+            //debug
+            // if layer == 0 {
+            //     let mut output = Tensor::<f32>::default(&vec![seq_len, self.d]);
+            //     OP::matmul_transb(&mut output, 0., &hidden_states, &self.params.wo[layer], 1.);
+            //     output.print();
+            // }
             //todo!("down_proj matmul and add residual");
             // x = x @ O_weight.T
             // residual = x + residual
             OP::matmul_transb(&mut residual, 1., &hidden_states, &self.params.wo[layer], 1.);
 
             //todo!("mlp(...)");
+            //let mut hidden_states = Tensor::<f32>::default(&vec![seq_len, self.d]);
             mlp(
                 &mut residual,
                 &mut hidden_states,
@@ -123,6 +132,11 @@ impl Llama<f32> {
                 &self.params.rms_ffn_w[layer],
                 self.eps,
             );
+            // //debug
+            // if layer == 0 {
+            //     residual.print();
+            //     panic!("stop");
+            // }
         }
 
         // No matter what seq_len, the output is always a 1D vector of length vocab,
@@ -150,24 +164,36 @@ impl Llama<f32> {
         top_p: f32,
         top_k: u32,
         temperature: f32,
+        cache: &mut KVCache<f32>,
+        len: &mut usize,
     ) -> Vec<u32>{
         //todo!("实现文本生成");
         let mut result = Vec::<u32>::new();
-        let mut cache = self.new_cache();
+        //let mut cache = self.new_cache();
         result.extend_from_slice(token_ids);
         //启动阶段
         let input = Tensor::new(result.clone(), &vec![1, result.len()]);
-        let logits = self.forward(&input, &mut cache);
+        let logits = self.forward(&input, cache);
         let mut output = OP::random_sample(&logits, top_p, top_k, temperature);   
         result.push(output);
+        *len += result.len();
         //自回归阶段
-        while result.len() < max_len && output != self.eos_token_id {
+        while *len < max_len && output != self.eos_token_id {
             let input = Tensor::new(vec![output], &vec![1, 1]);
-            let logits = self.forward(&input, &mut cache);
+            let logits = self.forward(&input, cache);
             output = OP::random_sample(&logits, top_p, top_k, temperature);
             result.push(output);
+            *len += 1;
         }
         result
+    }
+
+    pub fn get_bos_token_id(&self) -> u32 {
+        self.bos_token_id
+    }
+
+    pub fn get_eos_token_id(&self) -> u32 {
+        self.eos_token_id
     }
 }
 
@@ -186,18 +212,6 @@ fn self_attention(
     //todo!("Implement self_attention");
     
     //计算score = Q @ K.T / sqrt(dim)
-    for g in 0..n_groups {
-        
-        for h in 0..n_kv_h {
-            let mut tem_k_vec = Vec::<f32>::new();
-            for i in 0..total_seq_len {
-                for j in 0..dqkv {
-                    tem_k_vec.push(k.data()[i * n_kv_h * dqkv + h * dqkv + j]);
-                }
-            }
-        }
-    }
-
     for h in 0..n_kv_h {
 
         //得到一头的k
@@ -239,7 +253,7 @@ fn self_attention(
 
             //计算每一组q的score = Q @ K.T / sqrt(dim)
             let mut one_h_g_score = Tensor::<f32>::default(&vec![seq_len, total_seq_len]);
-            matmul_transb(&mut one_h_g_score, 0., &group_q, &tem_k, (dqkv as f32).sqrt());
+            matmul_transb(&mut one_h_g_score, 0., &group_q, &tem_k, 1.0/(dqkv as f32).sqrt());
 
             //计算attn = softmax(score)
             let mut attn = one_h_g_score;
@@ -248,7 +262,7 @@ fn self_attention(
             let len = seq_len * total_seq_len;
             unsafe {
                 for i in 0..(seq_len * total_seq_len) {
-                    att_scores.data_mut()[h * g * len + g * len + i] = attn.data()[i];
+                    att_scores.data_mut()[h * n_groups * seq_len * total_seq_len + g * len + i] = attn.data()[i];
                 }
             }
 
@@ -270,6 +284,12 @@ fn self_attention(
 
 }
 
+// hidden = rms_norm(residual)
+// gate = hidden @ gate_weight.T
+// up = hidden @ up_weight.T
+// itermediate = gate * sigmoid(gate) * up ## silu
+// output = itermediate @ down_weight.T
+// residual = output + residual
 fn mlp(
     residual: &mut Tensor<f32>,
     hidden_states: &mut Tensor<f32>,

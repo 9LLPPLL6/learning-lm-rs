@@ -33,19 +33,58 @@ impl LLamaParams<f32> {
             Tensor::new(data.to_vec(), &shape)
         };
         
-        LLamaParams {
-            embedding_table: get_tensor("lm_head.weight"),
-            rms_att_w: vec![get_tensor("model.layers.0.input_layernorm.weight"),get_tensor("model.layers.0.input_layernorm.weight")],
-            wq: vec![get_tensor("model.layers.0.self_attn.q_proj.weight"),get_tensor("model.layers.1.self_attn.q_proj.weight")],
-            wk: vec![get_tensor("model.layers.0.self_attn.k_proj.weight"),get_tensor("model.layers.1.self_attn.k_proj.weight")],
-            wv: vec![get_tensor("model.layers.0.self_attn.v_proj.weight"),get_tensor("model.layers.1.self_attn.v_proj.weight")],
-            wo: vec![get_tensor("model.layers.0.self_attn.o_proj.weight"),get_tensor("model.layers.1.self_attn.o_proj.weight")],
-            rms_ffn_w: vec![get_tensor("model.layers.0.post_attention_layernorm.weight"),get_tensor("model.layers.1.post_attention_layernorm.weight")],
-            w_up: vec![get_tensor("model.layers.0.mlp.up_proj.weight"),get_tensor("model.layers.1.mlp.up_proj.weight")],
-            w_gate: vec![get_tensor("model.layers.0.mlp.gate_proj.weight"),get_tensor("model.layers.1.mlp.gate_proj.weight")],
-            w_down: vec![get_tensor("model.layers.0.mlp.down_proj.weight"),get_tensor("model.layers.1.mlp.down_proj.weight")],
-            rms_out_w: get_tensor("model.norm.weight"),
-            lm_head: get_tensor("lm_head.weight")
+        let mut rms_att_w = Vec::new();
+        let mut wq = Vec::new();
+        let mut wk = Vec::new();
+        let mut wv = Vec::new();
+        let mut wo = Vec::new();
+        let mut rms_ffn_w = Vec::new();
+        let mut w_up = Vec::new();
+        let mut w_gate = Vec::new();
+        let mut w_down = Vec::new();
+
+        for i in 0..config.num_hidden_layers {
+            rms_att_w.push(get_tensor(&format!("model.layers.{}.input_layernorm.weight", i)));
+            wq.push(get_tensor(&format!("model.layers.{}.self_attn.q_proj.weight", i)));
+            wk.push(get_tensor(&format!("model.layers.{}.self_attn.k_proj.weight", i)));
+            wv.push(get_tensor(&format!("model.layers.{}.self_attn.v_proj.weight", i)));
+            wo.push(get_tensor(&format!("model.layers.{}.self_attn.o_proj.weight", i)));
+            rms_ffn_w.push(get_tensor(&format!("model.layers.{}.post_attention_layernorm.weight", i)));
+            w_up.push(get_tensor(&format!("model.layers.{}.mlp.up_proj.weight", i)));
+            w_gate.push(get_tensor(&format!("model.layers.{}.mlp.gate_proj.weight", i)));
+            w_down.push(get_tensor(&format!("model.layers.{}.mlp.down_proj.weight", i)));
+        }
+
+        if config.tie_word_embeddings {
+            LLamaParams {
+                embedding_table: get_tensor("lm_head.weight"),
+                rms_att_w: rms_att_w,
+                wq: wq,
+                wk: wk,
+                wv: wv,
+                wo: wo,
+                rms_ffn_w: rms_ffn_w,
+                w_up: w_up,
+                w_gate: w_gate,
+                w_down: w_down,
+                rms_out_w: get_tensor("model.norm.weight"),
+                lm_head: get_tensor("lm_head.weight")
+            }
+        } else {
+            LLamaParams {
+                embedding_table: get_tensor("model.embed_tokens.weight"),
+                rms_att_w: rms_att_w,
+                wq: wq,
+                wk: wk,
+                wv: wv,
+                wo: wo,
+                rms_ffn_w: rms_ffn_w,
+                w_up: w_up,
+                w_gate: w_gate,
+                w_down: w_down,
+                rms_out_w: get_tensor("model.norm.weight"),
+                lm_head: get_tensor("lm_head.weight")
+            }
         }
     }
 }
